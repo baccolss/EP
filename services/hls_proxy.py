@@ -2401,7 +2401,7 @@ class HLSProxy:
                 )
             
             # --- PROTECTED DOMAINS FALLBACK: curl_cffi ---
-            if HAS_CURL_CFFI and ("cccdn.net" in stream_url or "cinemacity.cc" in stream_url):
+            if HAS_CURL_CFFI and any(d in stream_url for d in ["cccdn.net", "cinemacity.cc", "torrentio", "strem.fun"]):
                 logger.info(f"🚀 [curl_cffi] Using browser impersonation for: {stream_url}")
                 try:
                     # Use a pooled curl session if available
