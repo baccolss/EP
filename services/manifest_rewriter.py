@@ -278,6 +278,7 @@ class ManifestRewriter:
                 header_params += "&disable_ssl=1"
             
             if selected_proxy:
+                # Usiamo un formato pulito per evitare double-encoding
                 header_params += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
 
             absolute_variant_url = urljoin(base_url, highest_quality_stream["url"])
@@ -313,9 +314,6 @@ class ManifestRewriter:
                     proxy_media_url = (
                         f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_media_url}{header_params}"
                     )
-                
-                if selected_proxy and "&proxy=" not in proxy_media_url:
-                    proxy_media_url += f"&proxy={urllib.parse.quote(selected_proxy, safe='')}"
                 proxied_media_lines.append(line[:uri_start] + proxy_media_url + line[uri_end:])
 
             rewritten_lines.append("#EXTM3U")

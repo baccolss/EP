@@ -1397,7 +1397,17 @@ class HLSProxy:
                 stream_headers = result.get("request_headers", {})
                 captured_manifest = result.get("captured_manifest")
                 force_disable_ssl = result.get("disable_ssl", False)
-                selected_proxy = request.query.get("proxy") or result.get("selected_proxy")
+                
+                # Cattura e sanifica il proxy per evitare double-encoding (%253A -> %3A)
+                raw_proxy = request.query.get("proxy") or result.get("selected_proxy")
+                selected_proxy = None
+                if raw_proxy:
+                    selected_proxy = urllib.parse.unquote(raw_proxy)
+                    if "://" not in selected_proxy and "%3a" in selected_proxy.lower():
+                        selected_proxy = urllib.parse.unquote(selected_proxy)
+                
+                if selected_proxy:
+                    logger.debug(f"🎯 Final selected proxy for manifest: {selected_proxy}")
 
                 if force_disable_ssl:
                     if "?" in stream_url:
