@@ -3,10 +3,10 @@ name: Sync Fork & Rebuild
 on:
   schedule:
     - cron: '0 3 * * *'   # Ogni giorno alle 3:00 AM UTC
-  workflow_dispatch:        # Permette anche di avviarlo manualmente
+  workflow_dispatch:        # Avvio manuale per testare
 
 jobs:
-  sync:
+  sync-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Sync fork con upstream
@@ -17,3 +17,12 @@ jobs:
             https://api.github.com/repos/baccolss/EP/merge-upstream \
             -d '{"branch":"main"}'
           echo "✅ Fork sincronizzato!"
+
+      - name: Force redeploy su Koyeb
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.KOYEB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://app.koyeb.com/v1/services/${{ secrets.KOYEB_SERVICE_ID }}/redeploy \
+            -d '{"skip_build": false}'
+          echo "✅ Redeploy Koyeb triggerato!"
