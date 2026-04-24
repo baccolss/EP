@@ -2,8 +2,11 @@ name: Sync Fork & Rebuild
 
 on:
   schedule:
-    - cron: '0 3 * * *'   # Ogni giorno alle 3:00 AM UTC
-  workflow_dispatch:        # Avvio manuale per testare
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   sync-and-deploy:
@@ -11,12 +14,21 @@ jobs:
     steps:
       - name: Sync fork con upstream
         run: |
-          curl -s -X POST \
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/baccolss/EP/merge-upstream \
-            -d '{"branch":"main"}'
-          echo "✅ Fork sincronizzato!"
+            -d '{"branch":"main"}')
+          cat /tmp/response.json
+          echo "HTTP status: $RESPONSE"
+          if [ "$RESPONSE" = "409" ]; then
+            echo "✅ Fork già aggiornato, nessun sync necessario"
+          elif [ "$RESPONSE" = "200" ]; then
+            echo "✅ Fork sincronizzato con successo!"
+          else
+            echo "⚠️ Risposta inattesa: $RESPONSE"
+          fi
 
       - name: Force redeploy su Koyeb
         run: |
