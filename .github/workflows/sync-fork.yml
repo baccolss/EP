@@ -13,27 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Sync fork con upstream
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          STATUS=$(curl -s -o /tmp/out.json -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/baccolss/EP/merge-upstream \
-            -d '{"branch":"main"}')
-          echo "Risposta: $STATUS"
-          cat /tmp/out.json
-          exit 0
-
-      - name: Force redeploy su Koyeb
-        env:
-          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE_ID: ${{ secrets.KOYEB_SERVICE_ID }}
         run: |
           curl -s -X POST \
-            -H "Authorization: Bearer $KOYEB_TOKEN" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/baccolss/EP/merge-upstream \
+            -d '{"branch":"main"}'
+          echo "✅ Sync fatto!"
+
+      - name: Force redeploy su Koyeb
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.KOYEB_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "https://app.koyeb.com/v1/services/$KOYEB_SERVICE_ID/redeploy" \
+            "https://app.koyeb.com/v1/services/${{ secrets.KOYEB_SERVICE_ID }}/redeploy" \
             -d '{"skip_build": false}'
-          echo "✅ Done"
+          echo "✅ Koyeb triggerato!"
