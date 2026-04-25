@@ -26,6 +26,6 @@ jobs:
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.KOYEB_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "https://app.koyeb.com/v1/services/f00877d5-a9b4-4900-b765-8482ca9d517c/redeploy" \
+            "https://api.koyeb.com/v1/services/f00877d5-a9b4-4900-b765-8482ca9d517c/redeploy" \
             -d '{"skip_build": false}')
           echo "Risposta Koyeb: $RESPONSE"
