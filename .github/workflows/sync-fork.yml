@@ -19,13 +19,12 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/baccolss/EP/merge-upstream \
             -d '{"branch":"main"}'
-          echo "✅ Sync fatto!"
 
-      - name: Redeploy Koyeb
+      - uses: actions/checkout@v4
+
+      - name: Trigger rebuild Koyeb
         run: |
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.KOYEB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            "https://api.koyeb.com/v1/services/f00877d5-a9b4-4900-b765-8482ca9d517c/redeploy" \
-            -d '{"skip_build": false}')
-          echo "Risposta Koyeb: $RESPONSE"
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git commit --allow-empty -m "chore: trigger rebuild"
+          git push
