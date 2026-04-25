@@ -23,9 +23,9 @@ jobs:
 
       - name: Redeploy Koyeb
         run: |
-          curl -s -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.KOYEB_TOKEN }}" \
             -H "Content-Type: application/json" \
             "https://app.koyeb.com/v1/services/f00877d5-a9b4-4900-b765-8482ca9d517c/redeploy" \
-            -d '{"skip_build": false}'
-          echo "✅ Koyeb triggerato!"
+            -d '{"skip_build": false}')
+          echo "Risposta Koyeb: $RESPONSE"
