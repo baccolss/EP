@@ -737,7 +737,7 @@ class HLSProxyDualMixin:
         synced = cached_sync
         bridge_used = False
         bridge_attempted = False
-        if audio_lang != "eng":
+        if synced is None and audio_lang != "eng":
             try:
                 bridge_url, bridge_meta = self._pick_audio(audio_text, audio_base, "eng")
                 if bridge_url != selected_audio_url:
@@ -762,6 +762,12 @@ class HLSProxyDualMixin:
                         if str(bridge_sync.get("status") or "") == "ok":
                             synced = bridge_sync
                             bridge_used = True
+                            report_task = asyncio.create_task(
+                                dual_service.offsets.report(cache_payload, bridge_sync)
+                            )
+                            if hasattr(self, "_background_tasks") and isinstance(self._background_tasks, set):
+                                self._background_tasks.add(report_task)
+                                report_task.add_done_callback(self._background_tasks.discard)
                             logger.info(
                                 "[DUAL] English-first sync succeeded; using requested %s track via '%s' offset",
                                 audio_lang,
