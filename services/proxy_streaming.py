@@ -874,12 +874,8 @@ class HLSProxyStreamingMixin:
                 logger.info(f"🚀 [curl_cffi] Using browser impersonation for: {stream_url}")
                 curl_s = None
                 try:
-                    curl_options = get_curl_ipv4_options(session_proxy).get(
-                        "curl_options"
-                    )
                     curl_s = get_curl_async_session()(
                         impersonate="chrome124",
-                        curl_options=curl_options,
                     )
                     curl_headers = prepare_curl_headers(stream_url, headers)
 
@@ -1790,7 +1786,6 @@ class HLSProxyStreamingMixin:
                     finally:
                         if (
                             retry_session
-                            and retry_proxy
                             and not retry_session.closed
                         ):
                             await retry_session.close()
@@ -1806,7 +1801,7 @@ class HLSProxyStreamingMixin:
                             "Recovered ClearKey segment request through a fresh WARP session"
                         )
             finally:
-                if segment_session and segment_proxy and not segment_session.closed:
+                if segment_session and not segment_session.closed:
                     await segment_session.close()
 
             if init_content is None and init_url:
