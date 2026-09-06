@@ -1544,7 +1544,6 @@ class HLSProxyStreamingMixin:
                     active_proxy,
                     extractor_key=request.query.get("extractor_key"),
                 )
-            # Do not restart the kernel tunnel from a stream request.
             if active_proxy and getattr(_shared, 'WARP_PROXY_URL', None) and active_proxy == _shared.WARP_PROXY_URL:
                 warp_healthy, warp_reason = await self._probe_warp(timeout_sec=3)
                 if not warp_healthy:
@@ -1553,6 +1552,7 @@ class HLSProxyStreamingMixin:
                         warp_reason,
                         log_context(active_proxy),
                     )
+                    await self._restart_warp_if_socket_unhealthy(warp_reason)
                 else:
                     logger.debug(
                         "WARP proxy healthy; stream failure is upstream source [%s]",
@@ -1933,15 +1933,17 @@ class HLSProxyStreamingMixin:
                 )
                 if can_retry_warp:
                     await self._invalidate_proxy_session(segment_proxy)
-                    if not await self.is_warp_healthy(timeout_sec=3):
+                    warp_healthy, warp_reason = await self._probe_warp(timeout_sec=3)
+                    if not warp_healthy:
                         logger.warning(
-                            "WARP health probe failed; retrying without automatic tunnel restart [%s]",
+                            "WARP health probe failed; retrying after socket recovery check [%s]",
                             request_log_context(
                                 request,
                                 url or init_url,
                                 route=safe_log_route(segment_proxy),
                             ),
                         )
+                        await self._restart_warp_if_socket_unhealthy(warp_reason)
 
                     retry_session, retry_proxy = await self._get_proxy_session(
                         url or init_url,
