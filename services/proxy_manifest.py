@@ -38,7 +38,10 @@ HLS_MEDIA_PLAYLIST_CACHE_MIN_TTL = 0.5
 HLS_MEDIA_PLAYLIST_CACHE_MAX_TTL = 2.0
 HLS_VOD_PLAYLIST_CACHE_TTL = 30.0
 MPD_MANIFEST_CACHE_MAX = 64
-MPD_MANIFEST_CACHE_TTL = 1.5
+# Dynamic MPD child playlists are requested sequentially during startup.  Keep
+# one source snapshot for that burst; the generated HLS window has its own
+# shorter live-refresh policy.
+MPD_MANIFEST_CACHE_TTL = 8.0
 
 
 class HLSProxyManifestHandlerMixin:
