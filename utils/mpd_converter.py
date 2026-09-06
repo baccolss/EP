@@ -290,6 +290,131 @@ class MPDToHLSConverter:
             logging.error(f"Error converting Master Playlist: {e}")
             return "#EXTM3U\n#EXT-X-ERROR: " + str(e)
 
+    def _convert_segment_list_playlist(
+        self,
+        root,
+        representation,
+        adaptation_set,
+        segment_list,
+        proxy_base,
+        original_url,
+        params,
+        clearkey_param,
+        server_side_decryption,
+        decryption_params,
+        media_type_param,
+        ext_param,
+        is_live,
+    ):
+        """Convert explicit DASH byte ranges to HLS relay URLs.
+
+        SegmentBase is expanded to SegmentList by the request layer.  Each
+        SegmentURL keeps its mediaRange; the relay then fetches/decrypts that
+        exact range instead of pretending it is a normal whole-file segment.
+        """
+        parents = {child: parent for parent in root.iter() for child in parent}
+        ancestry = []
+        node = representation
+        while node is not None:
+            ancestry.append(node)
+            node = parents.get(node)
+        base_url = original_url
+        for ancestor in reversed(ancestry):
+            base = ancestor.find('mpd:BaseURL', self.ns)
+            if base is not None and base.text:
+                base_url = urljoin(base_url, base.text.strip())
+
+        timescale = int(segment_list.get('timescale', '1'))
+        if timescale <= 0:
+            raise ValueError('Invalid SegmentList timescale')
+        segment_urls = segment_list.findall('mpd:SegmentURL', self.ns)
+        if not segment_urls:
+            raise ValueError('SegmentList contains no SegmentURL entries')
+
+        durations = []
+        timeline = segment_list.find('mpd:SegmentTimeline', self.ns)
+        if timeline is not None:
+            current_time = 0
+            for entry in timeline.findall('mpd:S', self.ns):
+                if entry.get('t') is not None:
+                    current_time = int(entry.get('t'))
+                duration = int(entry.get('d', '0'))
+                repeat = int(entry.get('r', '0'))
+                if duration <= 0 or repeat < 0:
+                    raise ValueError('Unsupported SegmentList timeline')
+                durations.extend([duration / timescale] * (repeat + 1))
+                current_time += duration * (repeat + 1)
+
+        fallback_duration = float(segment_list.get('duration', '0') or 0) / timescale
+        if fallback_duration <= 0:
+            fallback_duration = 1.0
+        if len(durations) < len(segment_urls):
+            durations.extend([fallback_duration] * (len(segment_urls) - len(durations)))
+        durations = durations[:len(segment_urls)]
+
+        init = segment_list.find('mpd:Initialization', self.ns)
+        init_url = None
+        init_range = None
+        if init is not None:
+            init_url = urljoin(base_url, init.get('sourceURL', '') or '')
+            init_range = init.get('range')
+        if server_side_decryption and not init_url:
+            raise ValueError('ClearKey SegmentList requires initialization metadata')
+
+        header_params = self._extract_header_params(params)
+        lines = ['#EXTM3U', '#EXT-X-VERSION:6']
+        if not is_live:
+            lines.append('#EXT-X-PLAYLIST-TYPE:VOD')
+        lines.append(f'#EXT-X-TARGETDURATION:{max(1, int(max(durations)) + 1)}')
+        lines.append('#EXT-X-MEDIA-SEQUENCE:0')
+
+        if init_url:
+            encoded_init = urllib.parse.quote(init_url, safe='')
+            if server_side_decryption:
+                init_uri = (
+                    f'{proxy_base}/decrypt/segment.mp4?url={encoded_init}&is_init=1'
+                    f'{("&init_range=" + urllib.parse.quote(init_range, safe="")) if init_range else ""}'
+                    f'{decryption_params}{media_type_param}{header_params}'
+                )
+            else:
+                init_uri = (
+                    f'{proxy_base}/segment/init.mp4?base_url={encoded_init}'
+                    f'{("&range=" + urllib.parse.quote(init_range, safe="")) if init_range else ""}'
+                    f'{media_type_param}{header_params}'
+                )
+            lines.append(f'#EXT-X-MAP:URI="{init_uri}"')
+
+        for index, segment in enumerate(segment_urls):
+            duration = durations[index]
+            media_url = urljoin(base_url, segment.get('media', '') or '')
+            media_range = segment.get('mediaRange') or segment.get('range')
+            encoded_media = urllib.parse.quote(media_url, safe='')
+            if server_side_decryption:
+                if not init_url:
+                    raise ValueError('ClearKey SegmentList media has no initialization URL')
+                encoded_init = urllib.parse.quote(init_url, safe='')
+                seg_url = (
+                    f'{proxy_base}/decrypt/segment.mp4?url={encoded_media}'
+                    f'&init_url={encoded_init}&skip_init=1'
+                    f'{("&media_range=" + urllib.parse.quote(media_range, safe="")) if media_range else ""}'
+                    f'{("&init_range=" + urllib.parse.quote(init_range, safe="")) if init_range else ""}'
+                    f'{decryption_params}{media_type_param}{header_params}'
+                )
+            else:
+                name = os.path.basename(urllib.parse.urlsplit(media_url).path) or f'segment_{index}.mp4'
+                seg_url = (
+                    f'{proxy_base}/segment/{urllib.parse.quote(name, safe="")}'
+                    f'?base_url={encoded_media}'
+                    f'{("&range=" + urllib.parse.quote(media_range, safe="")) if media_range else ""}'
+                    f'{media_type_param}{header_params}'
+                )
+            lines.append(f'#EXTINF:{duration:.3f},')
+            lines.append(seg_url)
+
+        if not is_live:
+            lines.append('#EXT-X-ENDLIST')
+        return '\n'.join(lines)
+
     def convert_media_playlist(self, manifest_content: str, rep_id: str, proxy_base: str, original_url: str, params: str, clearkey_param: str = None) -> str:
         """Genera la Media Playlist HLS per una specifica Representation."""
         try:
@@ -422,6 +547,20 @@ class MPDToHLSConverter:
             if segment_template is None:
                 # Fallback: cerca nell'AdaptationSet
                 segment_template = adaptation_set.find('mpd:SegmentTemplate', self.ns)
+
+            segment_list = None
+            if segment_template is None:
+                segment_list = representation.find('mpd:SegmentList', self.ns)
+                if segment_list is None:
+                    segment_list = adaptation_set.find('mpd:SegmentList', self.ns)
+
+            if segment_list is not None:
+                return self._convert_segment_list_playlist(
+                    root, representation, adaptation_set, segment_list,
+                    proxy_base, original_url, params, clearkey_param,
+                    server_side_decryption, decryption_params,
+                    media_type_param, ext_param, is_live,
+                )
             
             if segment_template is not None:
                 timescale = int(segment_template.get('timescale', '1'))
