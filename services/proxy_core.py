@@ -971,6 +971,7 @@ class HLSProxyCoreMixin:
         getattr(self, "_segment_prefetch_cache", {}).clear()
         getattr(self, "_segment_next_urls", {}).clear()
         getattr(self, "_hls_playlist_cache", {}).clear()
+        getattr(self, "_mpd_manifest_cache", {}).clear()
 
         tasks = list(self._background_tasks)
         for task in tasks:

@@ -4,6 +4,7 @@ from urllib.parse import urljoin
 import logging
 import os
 import re
+import time
 from fractions import Fraction
 import math
 from datetime import datetime, timezone
@@ -13,6 +14,12 @@ logger = logging.getLogger(__name__)
 class MPDToHLSConverter:
     """Converte manifest MPD (DASH) in playlist HLS (m3u8) on-the-fly."""
     _timeline_sequences = {}
+    _live_window_snapshots = {}
+    _live_sequence_origins = {}
+    # Cover sequential audio/video child-playlist requests during iOS startup.
+    # MPD minimumUpdatePeriod is ~2s; 8s covers slow sequential startup while
+    # keeping the live edge fresh on the next playlist refresh.
+    _live_window_snapshot_ttl = 8.0
 
     @staticmethod
     def _duration_seconds(value):
@@ -662,56 +669,94 @@ class MPDToHLSConverter:
                         # Calculate global last time and global first time across all video and audio representations in this MPD XML
                         global_last_time_sec = (all_segments[-1]['time'] + all_segments[-1]['d']) / timescale
                         global_first_time_sec = 0.0
-                        for period in root.findall('.//mpd:Period', self.ns):
-                            for aset in period.findall('mpd:AdaptationSet', self.ns):
-                                mime = aset.get('mimeType', '')
-                                if not mime:
-                                    rep = aset.find('mpd:Representation', self.ns)
-                                    if rep is not None:
-                                        mime = rep.get('mimeType', '')
-                                if 'video' in mime or 'audio' in mime:
-                                    template = aset.find('mpd:SegmentTemplate', self.ns)
-                                    for r in aset.findall('mpd:Representation', self.ns):
-                                        r_template = r.find('mpd:SegmentTemplate', self.ns)
-                                        if r_template is None:
-                                            r_template = template
-                                        if r_template is not None:
-                                            r_timescale = int(r_template.get('timescale', '1'))
-                                            timeline = r_template.find('mpd:SegmentTimeline', self.ns)
-                                            if timeline is not None:
-                                                first_t = None
-                                                current_t = None
-                                                last_end = None
-                                                for s in timeline.findall('mpd:S', self.ns):
-                                                    t = s.get('t')
-                                                    if t:
-                                                        current_t = int(t)
-                                                    elif current_t is None:
-                                                        current_t = 0
-                                                    if first_t is None:
-                                                        first_t = current_t
-                                                    d = int(s.get('d'))
-                                                    r_rep = int(s.get('r', '0'))
-                                                    last_end = current_t + d * (r_rep + 1)
-                                                    current_t = last_end
-                                                if first_t is not None:
-                                                    first_seg_time_sec = first_t / r_timescale
-                                                    if first_seg_time_sec > global_first_time_sec:
-                                                        global_first_time_sec = first_seg_time_sec
-                                                if last_end is not None:
-                                                    last_seg_time_sec = last_end / r_timescale
-                                                    if last_seg_time_sec > global_last_time_sec:
-                                                        global_last_time_sec = last_seg_time_sec
+                        duration_samples = [seg['duration'] for seg in all_segments[-32:]]
+                        stream_key = original_url.split('?')[0]
+                        now = time.monotonic()
+                        snapshot = self.__class__._live_window_snapshots.get(stream_key)
+                        if (
+                            snapshot
+                            and now - snapshot['created'] <= self.__class__._live_window_snapshot_ttl
+                        ):
+                            global_last_time_sec = snapshot['edge']
+                            global_first_time_sec = snapshot['first']
+                            common_duration_sec = snapshot['duration']
+                        else:
+                            # First child request builds shared live-edge metadata.
+                            # Later audio/video requests reuse it instead of walking
+                            # every representation timeline again.
+                            for period in root.findall('.//mpd:Period', self.ns):
+                                for aset in period.findall('mpd:AdaptationSet', self.ns):
+                                    mime = aset.get('mimeType', '')
+                                    if not mime:
+                                        rep = aset.find('mpd:Representation', self.ns)
+                                        if rep is not None:
+                                            mime = rep.get('mimeType', '')
+                                    if 'video' in mime or 'audio' in mime:
+                                        template = aset.find('mpd:SegmentTemplate', self.ns)
+                                        for r in aset.findall('mpd:Representation', self.ns):
+                                            r_template = r.find('mpd:SegmentTemplate', self.ns)
+                                            if r_template is None:
+                                                r_template = template
+                                            if r_template is not None:
+                                                r_timescale = int(r_template.get('timescale', '1'))
+                                                timeline = r_template.find('mpd:SegmentTimeline', self.ns)
+                                                if timeline is not None:
+                                                    first_t = None
+                                                    current_t = None
+                                                    last_end = None
+                                                    for s in timeline.findall('mpd:S', self.ns):
+                                                        t = s.get('t')
+                                                        if t:
+                                                            current_t = int(t)
+                                                        elif current_t is None:
+                                                            current_t = 0
+                                                        if first_t is None:
+                                                            first_t = current_t
+                                                        d = int(s.get('d'))
+                                                        r_rep = int(s.get('r', '0'))
+                                                        if d > 0:
+                                                            duration_samples.extend(
+                                                                [d / r_timescale] * min(max(r_rep + 1, 1), 64)
+                                                            )
+                                                        last_end = current_t + d * (r_rep + 1)
+                                                        current_t = last_end
+                                                    if first_t is not None:
+                                                        first_seg_time_sec = first_t / r_timescale
+                                                        if first_seg_time_sec > global_first_time_sec:
+                                                            global_first_time_sec = first_seg_time_sec
+                                                    if last_end is not None:
+                                                        last_seg_time_sec = last_end / r_timescale
+                                                        if last_seg_time_sec > global_last_time_sec:
+                                                            global_last_time_sec = last_seg_time_sec
 
-                        # Fallback if global variables couldn't be calculated
-                        if global_last_time_sec == 0.0:
-                            global_last_time_sec = all_segments[-1]['time'] / timescale
-                        if global_first_time_sec == 0.0:
-                            global_first_time_sec = all_segments[0]['time'] / timescale
+                            # Fallback if global variables couldn't be calculated
+                            if global_last_time_sec == 0.0:
+                                global_last_time_sec = all_segments[-1]['time'] / timescale
+                            if global_first_time_sec == 0.0:
+                                global_first_time_sec = all_segments[0]['time'] / timescale
+
+                            ordered_durations = sorted(
+                                duration for duration in duration_samples if duration > 0
+                            )
+                            common_duration_sec = (
+                                ordered_durations[len(ordered_durations) // 2]
+                                if ordered_durations
+                                else max(seg['duration'] for seg in all_segments)
+                            )
+                            snapshot = {
+                                'created': now,
+                                'edge': global_last_time_sec,
+                                'first': global_first_time_sec,
+                                'duration': max(common_duration_sec, 0.001),
+                            }
+                            self.__class__._live_window_snapshots[stream_key] = snapshot
+                            while len(self.__class__._live_window_snapshots) > 256:
+                                self.__class__._live_window_snapshots.pop(
+                                    next(iter(self.__class__._live_window_snapshots))
+                                )
 
                         # Force monotonicity for the live edge timestamp to shield against CDN cache jitter.
                         # We use the base URL (without query params) as the unique stream key.
-                        stream_key = original_url.split('?')[0]
                         if not hasattr(self.__class__, '_last_times'):
                             self.__class__._last_times = {}
                         
@@ -722,6 +767,7 @@ class MPDToHLSConverter:
                         else:
                             # Update cache (or accept large resets)
                             self.__class__._last_times[stream_key] = global_last_time_sec
+                        snapshot['edge'] = global_last_time_sec
 
                         # Keep only segments starting within the last 12 seconds of the global live edge.
                         # Clamp window start to global_first_time_sec so we never request segments that don't exist in one of the tracks.
@@ -747,11 +793,23 @@ class MPDToHLSConverter:
                         # Preserve segment identity across rolling timeline reloads.
                         if len(segments_to_use) > 0:
                             first_seg = segments_to_use[0]
-                            media_sequence = self._sequence_for_window(
-                                (original_url.split('?')[0], rep_id, timescale, presentation_time_offset, media, initialization),
-                                all_segments,
-                                first_seg['time'],
+                            sequence_origin = self.__class__._live_sequence_origins.get(stream_key)
+                            if sequence_origin is None or global_last_time_sec < previous_max - 60.0:
+                                sequence_origin = global_first_time_sec
+                                self.__class__._live_sequence_origins[stream_key] = sequence_origin
+                            media_sequence = max(
+                                0,
+                                int(round(
+                                    (
+                                        first_seg['time'] / timescale
+                                        - sequence_origin
+                                    ) / max(common_duration_sec, 0.001)
+                                )),
                             )
+                            while len(self.__class__._live_sequence_origins) > 256:
+                                self.__class__._live_sequence_origins.pop(
+                                    next(iter(self.__class__._live_sequence_origins))
+                                )
 
                             
                             lines.append(f'#EXT-X-TARGETDURATION:{int(max_duration) + 1}')
