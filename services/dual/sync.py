@@ -997,8 +997,11 @@ class SyncEngine:
                 video_start_time,
             )
             if result["status"] != "ok":
+                # Linear anchor starts at 300s, not 60s: intros/logos often
+                # differ by <1s between editions, poisoning the edge sample
+                # while the rest of the film matches with a constant offset.
                 linear_positions = sorted(set(round(position, 3) for position in (
-                    min(60.0, common * .1),
+                    min(300.0, common * .1),
                     common * .5,
                     max(30.0, common - 90.0),
                 )))
@@ -1024,9 +1027,18 @@ class SyncEngine:
             else:
                 result["linear_measurements"] = linear_measurements
         if result["status"] != "ok":
+            def _summarize(items):
+                try:
+                    return ",".join(
+                        f"{float(item.get('position', 0.0)):.0f}:{float(item.get('correlation', 0.0)):.2f}@{float(item.get('offset', 0.0)):.2f}"
+                        for item in items or []
+                    ) or "-"
+                except (TypeError, ValueError):
+                    return "-"
             logger.warning(
                 "[DUAL] sync rejected video=%.3fs audio=%.3fs deviation=%.3fs "
-                "linear_samples=%d rate=%s linear_deviation=%s end_deviation=%s",
+                "linear_samples=%d rate=%s linear_deviation=%s end_deviation=%s "
+                "samples=%s linear=%s",
                 video_duration,
                 audio_duration,
                 float(result.get("deviation") or 0.0),
@@ -1034,6 +1046,8 @@ class SyncEngine:
                 result.get("candidate_rate", "-"),
                 result.get("linear_deviation", "-"),
                 result.get("end_deviation", "-"),
+                _summarize(measurements),
+                _summarize(linear_measurements),
             )
         if validate_muxed_reference:
             result["reference_matches_video"] = bool(reference_matches_video)
