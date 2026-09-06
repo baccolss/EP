@@ -227,8 +227,9 @@ class MPDToHLSConverter:
                 
                 # Costruisci URL Media Playlist Audio
                 encoded_url = urllib.parse.quote(original_url, safe='')
+                encoded_rep_id = urllib.parse.quote(str(rep_id or ''), safe='')
                 header_params = self._extract_header_params(params)
-                media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={rep_id}{header_params}"
+                media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={encoded_rep_id}{header_params}"
                 
                 # Usa GROUP-ID 'audio' e NAME basato su ID o lingua
                 lang = adaptation_set.get('lang', 'und')
@@ -259,8 +260,9 @@ class MPDToHLSConverter:
                     codecs = self._hls_codec(representation.get('codecs') or adaptation_set.get('codecs'))
                     
                     encoded_url = urllib.parse.quote(original_url, safe='')
+                    encoded_rep_id = urllib.parse.quote(str(rep_id or ''), safe='')
                     header_params = self._extract_header_params(params)
-                    media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={rep_id}{header_params}"
+                    media_url = f"{proxy_base}/proxy/hls/manifest.m3u8?d={encoded_url}&format=hls&rep_id={encoded_rep_id}{header_params}"
                     
                     # Determine codecs (must combine video and audio codecs for HLS spec compliance)
                     combined_codecs = []
