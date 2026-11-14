@@ -57,11 +57,13 @@ DEFAULT_CONFIG = {
     # Preferred exit country; the app picks a relay there and pins its fingerprint.
     "tor_exit_country": "",
     "extractor_proxies": {},
+    # Manual premium page tickets, slug -> ticket. See routes/dlstreams_ticket.py.
+    "dlstreams_manual_tickets": {},
     # Cinejoy's gateway rejects Cloudflare WARP egress (HTTP 403) and
     # Sportsonline's player serves a Cloudflare Turnstile-gated variant to WARP
-    # egress IPs. Keep those resolvers direct; DLStreams instead needs WARP for
-    # its premium player, which rejects datacenter IPs with 403.
-    "warp_off_extractors": ["cinejoy", "sportsonline"],
+    # egress IPs. Keep those resolvers direct. DLStreams is also kept direct
+    # here (local change, see dlstreams_manual_tickets above).
+    "warp_off_extractors": ["cinejoy", "sportsonline", "dlstreams"],
     "proxy_off_extractors": [],
     "proxy_exclude_domains": [],
     # Force the highest video variant (no adaptive bitrate). Can be enabled per

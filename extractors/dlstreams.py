@@ -198,6 +198,17 @@ async def _premium_curl_get(
         return 0, ""
 
 
+def _manual_ticket(slug: str) -> str:
+    """Page ticket pasted from a real browser (routes/dlstreams_ticket.py)."""
+    try:
+        import config_store
+
+        tickets = config_store.get("dlstreams_manual_tickets", {}) or {}
+    except Exception:
+        return ""
+    return str(tickets.get(slug) or tickets.get("*") or "").strip()
+
+
 async def premium_playlist_token(
     session, playlist_url: str, headers: dict = None, force: bool = False,
     route_key: str = "", ticket: str | None = None, proxy: str | None = None,
@@ -234,6 +245,8 @@ async def premium_playlist_token(
             or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
             "Accept": "*/*",
         }
+        # Explicit ticket wins; otherwise use the manual one from config.
+        ticket = ticket or _manual_ticket(slug)
         try:
             token_query = f"slug={slug}"
             if ticket:
